@@ -1,0 +1,5 @@
+15.000.000 de Partidas
+Placar final:
+  IA Ingenua 1: 8774428 (58.5%)
+  IA Ingenua 2: 4323575 (28.8%)
+  Empates: 1901997 (12.7%)

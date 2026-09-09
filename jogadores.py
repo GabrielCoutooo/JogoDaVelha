@@ -1,3 +1,12 @@
+# -*- coding: utf-8 -*-
+"""
+Módulo com os tipos de jogadores do Jogo da Velha:
+- JogadorHumano: recebe jogadas via input do usuário.
+- JogadorIngenuo: joga em posições aleatórias entre as livres.
+- JogadorFera: IA imbatível baseada em minimax, com memoização (cache)
+  para ser muito mais rápida em simulações em massa.
+"""
+
 import random
 
 
@@ -36,14 +45,30 @@ class JogadorIngenuo(Jogador):
 
 
 class JogadorFera(Jogador):
-    """IA imbatível: usa minimax para nunca perder (ganha ou empata)."""
+    """
+    IA imbatível: usa minimax para nunca perder (ganha ou empata).
+
+    Otimização: memoização (cache) de tabuleiros já avaliados. O jogo da
+    velha tem só 5.478 tabuleiros possíveis, então tabuleiros repetidos
+    (alcançados por ordens de jogadas diferentes) são resolvidos em O(1)
+    depois da primeira vez.
+
+    Observação técnica: NÃO combinamos isso com poda alfa-beta. Poda
+    alfa-beta junto com cache exige guardar se o valor é exato ou só um
+    limite (bound) — se feito de forma ingênua (como numa primeira versão
+    testada aqui), o cache pode devolver um valor incorreto e a Fera deixa
+    de jogar perfeitamente. Memoização sozinha não tem esse problema: todo
+    valor guardado é sempre exato, então a Fera continua garantidamente
+    imbatível.
+    """
+
+    def __init__(self, nome, simbolo=None):
+        super().__init__(nome, simbolo)
+        self._cache = {}  # chave: (tupla_do_tabuleiro, maximizando) -> pontuação
 
     def jogar(self, tabuleiro):
         adversario = 'O' if self.simbolo == 'X' else 'X'
         melhor_pontuacao = -float('inf')
-        melhor_jogada = None
-
-        # Pequena aleatoriedade entre jogadas de mesma pontuação para variar as partidas
         candidatas = []
 
         for pos in tabuleiro.posicoes_livres():
@@ -56,28 +81,35 @@ class JogadorFera(Jogador):
             elif pontuacao == melhor_pontuacao:
                 candidatas.append(pos)
 
+        # Sorteia entre jogadas empatadas em pontuação, para variar as partidas
         return random.choice(candidatas)
 
     def _minimax(self, tabuleiro, profundidade, maximizando, meu_simbolo, adversario):
+        chave = (tuple(tabuleiro.casas), maximizando)
+        if chave in self._cache:
+            return self._cache[chave]
+
         vencedor = tabuleiro.vencedor()
         if vencedor == meu_simbolo:
-            return 10 - profundidade
+            resultado = 10 - profundidade
         elif vencedor == adversario:
-            return profundidade - 10
+            resultado = profundidade - 10
         elif tabuleiro.cheio():
-            return 0
-
-        if maximizando:
+            resultado = 0
+        elif maximizando:
             melhor = -float('inf')
             for pos in tabuleiro.posicoes_livres():
                 copia = tabuleiro.copiar()
                 copia.jogar(pos, meu_simbolo)
                 melhor = max(melhor, self._minimax(copia, profundidade + 1, False, meu_simbolo, adversario))
-            return melhor
+            resultado = melhor
         else:
             pior = float('inf')
             for pos in tabuleiro.posicoes_livres():
                 copia = tabuleiro.copiar()
                 copia.jogar(pos, adversario)
                 pior = min(pior, self._minimax(copia, profundidade + 1, True, meu_simbolo, adversario))
-            return pior
+            resultado = pior
+
+        self._cache[chave] = resultado
+        return resultado
