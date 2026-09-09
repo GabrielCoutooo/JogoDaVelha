@@ -42,7 +42,10 @@ def jogar_partida(jogador1, jogador2, mostrar_tabuleiro=True, registrar_jogadas=
 
     if mostrar_tabuleiro:
         print("\n=== Fim de jogo ===")
-        print(f"Resultado: {resultado}")
+        if resultado == "Empate":
+            print("Deu velha! Empate!")
+        else:
+            print(f"O vencedor é: {resultado}!")
 
     return {
         "vencedor": resultado,
