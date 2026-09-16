@@ -116,7 +116,6 @@ def executar_serie_ia_vs_ia(jogador1, jogador2, num_partidas, caminho_arquivo=No
         linhas.append(resultado["tabuleiro_final"])
         linhas.append(f"Resultado: {resultado['vencedor']}")
 
-    # Calcula a porcentagem de cada resultado em relação ao total de partidas
     porcentagens = {
         nome: (vitorias / num_partidas * 100) if num_partidas > 0 else 0.0
         for nome, vitorias in placar.items()

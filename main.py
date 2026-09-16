@@ -7,7 +7,7 @@ def escolher_jogador(numero):
     print(f"\nEscolha o tipo do Jogador {numero}:")
     print("1 - Usuário (humano)")
     print("2 - IA Ingênua (joga em posições aleatórias)")
-    print("3 - IA Fera (joga com estratégia perfeita, nunca perde)")
+    print("3 - IA Fera (joga por regras, na raça, e nunca perde)")
     print("4 - IA Aprendiz (começa ingênua e aprende as jogadas que dão certo)")
     print("0 - Sair do jogo")
 

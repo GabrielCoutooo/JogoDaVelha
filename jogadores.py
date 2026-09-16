@@ -1,9 +1,11 @@
+# -*- coding: utf-8 -*-
 """
 Módulo com os tipos de jogadores do Jogo da Velha:
 - JogadorHumano:   recebe jogadas via input do usuário.
 - JogadorIngenuo:  joga em posições aleatórias entre as livres.
-- JogadorFera:     IA imbatível baseada em minimax, com memoização (cache)
-                   para ser muito mais rápida em simulações em massa.
+- JogadorFera:     IA imbatível "na raça" — sem minimax, sem busca em árvore.
+                   Usa uma sequência de regras explícitas (ganhar, bloquear,
+                   criar/bloquear garfo, centro, canto, lado).
 - JogadorAprendiz: começa jogando de forma ingênua (aleatória) e, a cada
                    partida, aprende com o resultado: mapeia as jogadas
                    feitas e dá pontos a elas (vitória = +2, empate = +1,
@@ -50,59 +52,163 @@ class JogadorIngenuo(Jogador):
 
 
 class JogadorFera(Jogador):
+    """
+    IA "na raça": nada de minimax, nada de busca em árvore, nada de cache.
+    Só uma sequência de regras explícitas, aplicadas em ordem de prioridade
+    a cada jogada — o mesmo tipo de estratégia manual que um jogador humano
+    experiente usaria (conhecida como algoritmo de Newell & Simon):
 
-    def __init__(self, nome, simbolo=None):
-        super().__init__(nome, simbolo)
-        self._cache = {}  # chave: (tupla_do_tabuleiro, maximizando) -> pontuação
+      1. Se eu tenho uma jogada que ganha o jogo agora, jogo ela.
+      2. Senão, se o adversário tem uma jogada que ganha o jogo agora,
+         bloqueio essa posição.
+      3. Senão, se eu tenho uma jogada que cria um "garfo" (duas ameaças de
+         vitória ao mesmo tempo, que o adversário não consegue bloquear as
+         duas), jogo ela.
+      4. Senão, se o adversário tem uma jogada que cria um garfo pra ele,
+         eu bloqueio: de preferência criando minha própria ameaça de
+         vitória em outro lugar (forçando ele a se defender em vez de
+         montar o garfo); se isso não for possível com segurança, ocupo
+         diretamente uma das posições de garfo dele.
+      5. Senão, jogo no centro, se estiver livre.
+      6. Senão, se o adversário ocupa um canto, jogo no canto oposto.
+      7. Senão, jogo em qualquer canto livre.
+      8. Senão, jogo em qualquer lado livre.
+
+    Esse conjunto de regras é conhecido por nunca perder uma partida de
+    jogo da velha (ganha sempre que possível, ou empata) — sem precisar
+    simular partidas futuras como o minimax fazia.
+    """
+
+    CANTOS = (0, 2, 6, 8)
+    LADOS = (1, 3, 5, 7)
+    CENTRO = 4
+    PARES_CANTOS_OPOSTOS = ((0, 8), (8, 0), (2, 6), (6, 2))
 
     def jogar(self, tabuleiro):
-        adversario = 'O' if self.simbolo == 'X' else 'X'
-        melhor_pontuacao = -float('inf')
-        candidatas = []
-        for pos in tabuleiro.posicoes_livres():
-            copia = tabuleiro.copiar()
-            copia.jogar(pos, self.simbolo)
-            pontuacao = self._minimax(copia, 0, False, self.simbolo, adversario)
-            if pontuacao > melhor_pontuacao:
-                melhor_pontuacao = pontuacao
-                candidatas = [pos]
-            elif pontuacao == melhor_pontuacao:
-                candidatas.append(pos)
-        # Sorteia entre jogadas empatadas em pontuação, para variar as partidas
-        return random.choice(candidatas)
+        meu_simbolo = self.simbolo
+        adversario = 'O' if meu_simbolo == 'X' else 'X'
+        livres = tabuleiro.posicoes_livres()
 
-    def _minimax(self, tabuleiro, profundidade, maximizando, meu_simbolo, adversario):
-        chave = (tuple(tabuleiro.casas), maximizando)
-        if chave in self._cache:
-            return self._cache[chave]
+        # 1. Ganhar agora, se possível
+        jogadas = self._jogadas_vencedoras(tabuleiro, meu_simbolo)
+        if jogadas:
+            return jogadas[0]
 
-        vencedor = tabuleiro.vencedor()
-        if vencedor == meu_simbolo:
-            resultado = 10 - profundidade
-        elif vencedor == adversario:
-            resultado = profundidade - 10
-        elif tabuleiro.cheio():
-            resultado = 0
-        elif maximizando:
-            melhor = -float('inf')
-            for pos in tabuleiro.posicoes_livres():
+        # 2. Bloquear vitória imediata do adversário
+        jogadas = self._jogadas_vencedoras(tabuleiro, adversario)
+        if jogadas:
+            return jogadas[0]
+
+        # 3. Criar um garfo pra mim
+        garfos_meus = self._jogadas_de_garfo(tabuleiro, meu_simbolo)
+        if garfos_meus:
+            return garfos_meus[0]
+
+        # 4. Bloquear garfo do adversário: procura, entre TODAS as posições
+        # livres (inclusive as que já são posição de garfo do adversário —
+        # bloquear e ameaçar ao mesmo tempo é o ideal), alguma jogada minha
+        # que deixe o adversário sem nenhum garfo na posição resultante.
+        garfos_adversario = self._jogadas_de_garfo(tabuleiro, adversario)
+        if garfos_adversario:
+            seguras = []
+            for pos in livres:
                 copia = tabuleiro.copiar()
                 copia.jogar(pos, meu_simbolo)
-                melhor = max(melhor, self._minimax(copia, profundidade + 1, False, meu_simbolo, adversario))
-            resultado = melhor
-        else:
-            pior = float('inf')
-            for pos in tabuleiro.posicoes_livres():
-                copia = tabuleiro.copiar()
-                copia.jogar(pos, adversario)
-                pior = min(pior, self._minimax(copia, profundidade + 1, True, meu_simbolo, adversario))
-            resultado = pior
+                if not self._jogadas_de_garfo(copia, adversario):
+                    seguras.append(pos)
+            if seguras:
+                # Entre as seguras, prioriza as que também criam uma ameaça
+                # de vitória própria (forçando o adversário a se defender)
+                for pos in seguras:
+                    copia = tabuleiro.copiar()
+                    copia.jogar(pos, meu_simbolo)
+                    if self._jogadas_vencedoras(copia, meu_simbolo):
+                        return pos
+                return seguras[0]
+            # Nenhuma jogada evita completamente o garfo do adversário:
+            # bloqueia diretamente uma das posições de garfo dele
+            return garfos_adversario[0]
 
-        self._cache[chave] = resultado
-        return resultado
+        # 5. Centro
+        if self.CENTRO in livres:
+            return self.CENTRO
+
+        # 6. Canto oposto a um canto ocupado pelo adversário
+        for canto, oposto in self.PARES_CANTOS_OPOSTOS:
+            if tabuleiro.casas[canto] == adversario and oposto in livres:
+                return oposto
+
+        # 7. Qualquer canto livre
+        cantos_livres = [c for c in self.CANTOS if c in livres]
+        if cantos_livres:
+            return random.choice(cantos_livres)
+
+        # 8. Qualquer lado livre
+        lados_livres = [l for l in self.LADOS if l in livres]
+        if lados_livres:
+            return random.choice(lados_livres)
+
+        # Fallback de segurança (não deveria ser alcançado)
+        return random.choice(livres)
+
+    def _jogadas_vencedoras(self, tabuleiro, simbolo):
+        """Posições livres em que jogar 'simbolo' agora ganha o jogo imediatamente."""
+        vencedoras = []
+        for pos in tabuleiro.posicoes_livres():
+            copia = tabuleiro.copiar()
+            copia.jogar(pos, simbolo)
+            if copia.vencedor() == simbolo:
+                vencedoras.append(pos)
+        return vencedoras
+
+    def _jogadas_de_garfo(self, tabuleiro, simbolo):
+        """
+        Posições livres em que, se 'simbolo' jogar ali, passa a ter DUAS (ou
+        mais) jogadas vencedoras diferentes na rodada seguinte — ou seja, um
+        "garfo" que o adversário não consegue bloquear por completo.
+
+        Importante: se, na posição resultante, o ADVERSÁRIO de 'simbolo' já
+        tiver uma vitória imediata disponível, esse "garfo" não vale nada —
+        o adversário simplesmente vence antes de o garfo se completar. Por
+        isso essas posições são descontadas da lista.
+        """
+        adversario = 'O' if simbolo == 'X' else 'X'
+        garfos = []
+        for pos in tabuleiro.posicoes_livres():
+            copia = tabuleiro.copiar()
+            copia.jogar(pos, simbolo)
+            if self._jogadas_vencedoras(copia, adversario):
+                continue
+            if len(self._jogadas_vencedoras(copia, simbolo)) >= 2:
+                garfos.append(pos)
+        return garfos
 
 
 class JogadorAprendiz(Jogador):
+    """
+    IA que começa "ingênua" (joga bastante aleatório) e vai aprendendo
+    com a experiência, partida a partida.
+
+    Sistema de pontuação:
+      - Cada jogada é identificada pelo par (estado do tabuleiro ANTES da
+        jogada, posição escolhida).
+      - Ao final de cada partida, toda jogada feita nela ganha/perde pontos
+        de acordo com o resultado:
+            vitória -> +PONTOS_VITORIA (padrão: +2)
+            empate  -> +PONTOS_EMPATE  (padrão: +1)
+            derrota -> +PONTOS_DERROTA (padrão: -1)
+      - Na hora de jogar, com probabilidade `taxa_exploracao` ele ainda
+        joga aleatório (exploração / comportamento "ingênuo"); caso
+        contrário, escolhe a jogada com maior pontuação acumulada para o
+        estado atual do tabuleiro (aproveitando o que aprendeu).
+      - `taxa_exploracao` decai a cada partida (multiplicada por
+        `decaimento`, com piso em `taxa_exploracao_minima`), então ele
+        começa jogando quase todo aleatório e, com o treino, passa a
+        confiar cada vez mais na própria experiência.
+
+    A "memória" (tabela de pontuação) pode ser salva/carregada em JSON,
+    para que o aprendizado persista entre execuções e sessões de treino.
+    """
 
     PONTOS_VITORIA = 2
     PONTOS_EMPATE = 1
@@ -132,9 +238,9 @@ class JogadorAprendiz(Jogador):
             # Comportamento "ingênuo": ainda explorando jogadas novas
             pos = random.choice(livres)
         else:
-            # Usa o que aprendeu: escolhe as jogadas com maior pontuação
+            # Usa o que aprendeu: escolhe a(s) jogada(s) com maior pontuação
             # para este estado específico do tabuleiro. Jogadas nunca vistas
-            # valem 0 (nem melhores, nem piores que uma jogada neutra).
+            # valem 0 (nem melhores, nem piores que uma jogada "neutra").
             melhor_pontuacao = None
             candidatas = []
             for p in livres:
@@ -152,7 +258,7 @@ class JogadorAprendiz(Jogador):
     def aprender_com_resultado(self, resultado):
         """
         Chamado ao final de cada partida com 'vitoria', 'empate' ou
-        derrota (do ponto de vista deste jogador). Distribui os pontos
+        'derrota' (do ponto de vista deste jogador). Distribui os pontos
         para todas as jogadas feitas na partida e decai a exploração.
         """
         delta = {
