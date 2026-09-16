@@ -1,5 +1,26 @@
 import datetime
+
 from tabuleiro import Tabuleiro
+
+
+def _notificar_resultado(jogador1, jogador2, resultado):
+    """
+    Se algum dos jogadores souber aprender com o resultado (ex.: JogadorAprendiz),
+    avisa cada um deles com 'vitoria', 'derrota' ou 'empate' do seu próprio
+    ponto de vista. Jogadores que não implementam 'aprender_com_resultado'
+    (Humano, Ingênuo, Fera) simplesmente são ignorados aqui.
+    """
+    if resultado == jogador1.nome:
+        resultado_j1, resultado_j2 = 'vitoria', 'derrota'
+    elif resultado == jogador2.nome:
+        resultado_j1, resultado_j2 = 'derrota', 'vitoria'
+    else:
+        resultado_j1 = resultado_j2 = 'empate'
+
+    if hasattr(jogador1, 'aprender_com_resultado'):
+        jogador1.aprender_com_resultado(resultado_j1)
+    if hasattr(jogador2, 'aprender_com_resultado'):
+        jogador2.aprender_com_resultado(resultado_j2)
 
 
 def jogar_partida(jogador1, jogador2, mostrar_tabuleiro=True, registrar_jogadas=False):
@@ -40,6 +61,10 @@ def jogar_partida(jogador1, jogador2, mostrar_tabuleiro=True, registrar_jogadas=
     else:
         resultado = "Empate"
 
+    # Dá a chance de jogadores "aprendizes" mapearem as jogadas desta partida
+    # (jogada boa -> pontua, jogada ruim -> perde ponto), usados em jogadas futuras.
+    _notificar_resultado(jogador1, jogador2, resultado)
+
     if mostrar_tabuleiro:
         print("\n=== Fim de jogo ===")
         if resultado == "Empate":
@@ -58,7 +83,11 @@ def executar_serie_ia_vs_ia(jogador1, jogador2, num_partidas, caminho_arquivo=No
     """
     Executa várias partidas entre duas IAs (sem imprimir tabuleiro na tela)
     e exporta um histórico completo + placar final para um arquivo .txt.
-    Retorna (caminho_do_arquivo, placar).
+    Retorna (caminho_do_arquivo, placar, porcentagens).
+
+    Como jogar_partida() já aciona o aprendizado a cada partida, rodar uma
+    série longa aqui é justamente a forma de "treinar" um JogadorAprendiz:
+    cada partida da série já atualiza a tabela de pontuação dele.
     """
     if caminho_arquivo is None:
         agora = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")

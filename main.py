@@ -1,4 +1,4 @@
-from jogadores import JogadorHumano, JogadorIngenuo, JogadorFera
+from jogadores import JogadorHumano, JogadorIngenuo, JogadorFera, JogadorAprendiz
 from jogo import jogar_partida, executar_serie_ia_vs_ia
 
 
@@ -8,7 +8,9 @@ def escolher_jogador(numero):
     print("1 - Usuário (humano)")
     print("2 - IA Ingênua (joga em posições aleatórias)")
     print("3 - IA Fera (joga com estratégia perfeita, nunca perde)")
+    print("4 - IA Aprendiz (começa ingênua e aprende as jogadas que dão certo)")
     print("0 - Sair do jogo")
+
     while True:
         opcao = input("Opção: ").strip()
         if opcao == '1':
@@ -18,6 +20,20 @@ def escolher_jogador(numero):
             return JogadorIngenuo(f"IA Ingenua {numero}")
         elif opcao == '3':
             return JogadorFera(f"IA Fera {numero}")
+        elif opcao == '4':
+            nome = f"IA Aprendiz {numero}"
+            arquivo = f"memoria_{nome.replace(' ', '_')}.json"
+            jogador = JogadorAprendiz(nome, arquivo_memoria=arquivo)
+            if jogador.pontuacoes:
+                print(
+                    f"  -> Memória carregada de '{arquivo}': "
+                    f"{len(jogador.pontuacoes)} jogadas mapeadas, "
+                    f"{jogador.partidas_treinadas} partida(s) já treinadas, "
+                    f"taxa de exploração atual: {jogador.taxa_exploracao:.3f}."
+                )
+            else:
+                print(f"  -> Sem memória prévia em '{arquivo}': começando 100% ingênua.")
+            return jogador
         elif opcao == '0':
             return None
         else:
@@ -26,6 +42,18 @@ def escolher_jogador(numero):
 
 def eh_humano(jogador):
     return isinstance(jogador, JogadorHumano)
+
+
+def salvar_memoria_se_aprendiz(jogador):
+    """Se o jogador for uma IA Aprendiz, persiste a tabela de pontuação em disco."""
+    if isinstance(jogador, JogadorAprendiz) and jogador.arquivo_memoria:
+        jogador.salvar_memoria()
+        print(
+            f"Memória de '{jogador.nome}' salva em '{jogador.arquivo_memoria}' "
+            f"({len(jogador.pontuacoes)} jogadas mapeadas, "
+            f"{jogador.partidas_treinadas} partida(s) treinadas, "
+            f"exploração atual: {jogador.taxa_exploracao:.3f})."
+        )
 
 
 def jogar_uma_rodada():
@@ -46,7 +74,8 @@ def jogar_uma_rodada():
         # Pelo menos um humano envolvido: partida única, com tabuleiro visível
         jogar_partida(jogador1, jogador2, mostrar_tabuleiro=True, registrar_jogadas=False)
     else:
-        # IA vs IA: série de partidas, sem tela, só exportação de histórico
+        # IA vs IA: série de partidas, sem tela, só exportação de histórico.
+        # Cada partida da série já treina automaticamente qualquer IA Aprendiz envolvida.
         while True:
             try:
                 num_partidas = int(input("\nQuantas partidas deseja simular entre as IAs? "))
@@ -59,7 +88,6 @@ def jogar_uma_rodada():
 
         print(f"\nSimulando {num_partidas} partida(s) entre {jogador1.nome} e {jogador2.nome}...")
         caminho, placar, porcentagens = executar_serie_ia_vs_ia(jogador1, jogador2, num_partidas)
-
         print(f"\nSimulação concluída! Histórico salvo em: {caminho}")
         print("\nPlacar final:")
         for nome, vitorias in placar.items():
@@ -67,12 +95,17 @@ def jogar_uma_rodada():
             rotulo = "Empates" if nome == "Empate" else nome
             print(f"  {rotulo}: {vitorias} ({pct:.1f}%)")
 
+    # Ao final da rodada (partida única ou série), salva o aprendizado de
+    # qualquer IA Aprendiz que tenha participado, para reaproveitar depois.
+    salvar_memoria_se_aprendiz(jogador1)
+    salvar_memoria_se_aprendiz(jogador2)
+
     return True
 
 
 def menu_principal():
     print("=" * 40)
-    print("        JOGO DA VELHA - MENU")
+    print("      JOGO DA VELHA - MENU")
     print("=" * 40)
 
     while True:
