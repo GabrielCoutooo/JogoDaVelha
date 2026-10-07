@@ -36,7 +36,9 @@ class Tabuleiro:
         return novo
 
     def __str__(self):
-        c = self.casas
+        # Casa vazia mostra o número da posição (1-9), como uma dica de onde
+        # jogar; assim que alguém joga ali, o número é substituído por X ou O.
+        c = [valor if valor != ' ' else str(i + 1) for i, valor in enumerate(self.casas)]
         sep = "\n---+---+---\n"
         linhas = []
         for i in range(0, 9, 3):
