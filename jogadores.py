@@ -6,7 +6,7 @@ Módulo com os tipos de jogadores do Jogo da Velha:
 - JogadorFera:     IA imbatível "na raça" — sem minimax, sem busca em árvore.
                    Usa uma sequência de regras explícitas (ganhar, bloquear,
                    criar/bloquear garfo, centro, canto, lado).
-- JogadorAprendiz: começa jogando de forma ingênua (aleatória) e, a cada
+- JogadorInteligente: começa jogando de forma ingênua (aleatória) e, a cada
                    partida, aprende com o resultado: mapeia as jogadas
                    feitas e dá pontos a elas (vitória = +2, empate = +1,
                    derrota = -1). Com o tempo passa a preferir as jogadas
@@ -83,6 +83,7 @@ class JogadorFera(Jogador):
     LADOS = (1, 3, 5, 7)
     CENTRO = 4
     PARES_CANTOS_OPOSTOS = ((0, 8), (8, 0), (2, 6), (6, 2))
+    ultima_regra = None  # nome da regra usada na última jogada (só pra consulta/exibição)
 
     def jogar(self, tabuleiro):
         meu_simbolo = self.simbolo
@@ -92,16 +93,19 @@ class JogadorFera(Jogador):
         # 1. Ganhar agora, se possível
         jogadas = self._jogadas_vencedoras(tabuleiro, meu_simbolo)
         if jogadas:
+            self.ultima_regra = "jogada vencedora imediata"
             return jogadas[0]
 
         # 2. Bloquear vitória imediata do adversário
         jogadas = self._jogadas_vencedoras(tabuleiro, adversario)
         if jogadas:
+            self.ultima_regra = "bloqueio de vitória do adversário"
             return jogadas[0]
 
         # 3. Criar um garfo pra mim
         garfos_meus = self._jogadas_de_garfo(tabuleiro, meu_simbolo)
         if garfos_meus:
+            self.ultima_regra = "criação de garfo (dupla ameaça)"
             return garfos_meus[0]
 
         # 4. Bloquear garfo do adversário: procura, entre TODAS as posições
@@ -123,32 +127,40 @@ class JogadorFera(Jogador):
                     copia = tabuleiro.copiar()
                     copia.jogar(pos, meu_simbolo)
                     if self._jogadas_vencedoras(copia, meu_simbolo):
+                        self.ultima_regra = "bloqueio de garfo criando ameaça própria"
                         return pos
+                self.ultima_regra = "bloqueio de garfo (posição segura)"
                 return seguras[0]
             # Nenhuma jogada evita completamente o garfo do adversário:
             # bloqueia diretamente uma das posições de garfo dele
+            self.ultima_regra = "bloqueio direto de garfo (sem opção totalmente segura)"
             return garfos_adversario[0]
 
         # 5. Centro
         if self.CENTRO in livres:
+            self.ultima_regra = "ocupação do centro"
             return self.CENTRO
 
         # 6. Canto oposto a um canto ocupado pelo adversário
         for canto, oposto in self.PARES_CANTOS_OPOSTOS:
             if tabuleiro.casas[canto] == adversario and oposto in livres:
+                self.ultima_regra = "canto oposto ao do adversário"
                 return oposto
 
         # 7. Qualquer canto livre
         cantos_livres = [c for c in self.CANTOS if c in livres]
         if cantos_livres:
+            self.ultima_regra = "canto livre"
             return random.choice(cantos_livres)
 
         # 8. Qualquer lado livre
         lados_livres = [l for l in self.LADOS if l in livres]
         if lados_livres:
+            self.ultima_regra = "lado livre"
             return random.choice(lados_livres)
 
         # Fallback de segurança (não deveria ser alcançado)
+        self.ultima_regra = "jogada de segurança (fallback)"
         return random.choice(livres)
 
     def _jogadas_vencedoras(self, tabuleiro, simbolo):
@@ -184,91 +196,91 @@ class JogadorFera(Jogador):
         return garfos
 
 
-class JogadorAprendiz(Jogador):
+class JogadorInteligente(Jogador):
     """
-    IA que começa "ingênua" (joga bastante aleatório) e vai aprendendo
-    com a experiência, partida a partida.
+    IA que aprende com as partidas usando valor medio por estado/jogada.
 
-    Sistema de pontuação:
-      - Cada jogada é identificada pelo par (estado do tabuleiro ANTES da
-        jogada, posição escolhida).
-      - Ao final de cada partida, toda jogada feita nela ganha/perde pontos
-        de acordo com o resultado:
-            vitória -> +PONTOS_VITORIA (padrão: +2)
-            empate  -> +PONTOS_EMPATE  (padrão: +1)
-            derrota -> +PONTOS_DERROTA (padrão: -1)
-      - Na hora de jogar, com probabilidade `taxa_exploracao` ele ainda
-        joga aleatório (exploração / comportamento "ingênuo"); caso
-        contrário, escolhe a jogada com maior pontuação acumulada para o
-        estado atual do tabuleiro (aproveitando o que aprendeu).
-      - `taxa_exploracao` decai a cada partida (multiplicada por
-        `decaimento`, com piso em `taxa_exploracao_minima`), então ele
-        começa jogando quase todo aleatório e, com o treino, passa a
-        confiar cada vez mais na própria experiência.
+    Para cada par (estado, jogada), a IA guarda soma das recompensas e numero
+    de visitas. Na hora de decidir, usa a recompensa media, em vez da soma
+    bruta. Assim, uma jogada nao fica melhor apenas por ter sido usada mais
+    vezes.
 
-    A "memória" (tabela de pontuação) pode ser salva/carregada em JSON,
-    para que o aprendizado persista entre execuções e sessões de treino.
+    A exploracao nunca chega a zero: depois de cair, fica no piso definido em
+    taxa_exploracao_minima. Dessa forma a IA continua testando jogadas novas
+    durante todo o treinamento.
     """
 
-    PONTOS_VITORIA = 2
-    PONTOS_EMPATE = 1
-    PONTOS_DERROTA = -1
+    PONTOS_VITORIA = 2.0
+    PONTOS_EMPATE = 1.0
+    PONTOS_DERROTA = -1.0
 
     def __init__(self, nome, simbolo=None, taxa_exploracao=1.0,
-                 taxa_exploracao_minima=0.05, decaimento=0.999,
+                 taxa_exploracao_minima=0.05, decaimento=0.99995,
                  arquivo_memoria=None):
         super().__init__(nome, simbolo)
-        # (estado_tabuleiro_tupla, posicao) -> pontuação acumulada
+        # (estado_tabuleiro_tupla, posicao) -> [soma_recompensas, visitas]
         self.pontuacoes = {}
+        self.taxa_exploracao_inicial = taxa_exploracao
         self.taxa_exploracao = taxa_exploracao
         self.taxa_exploracao_minima = taxa_exploracao_minima
         self.decaimento = decaimento
-        self.jogadas_da_partida = []  # jogadas feitas na partida em andamento
+        self.jogadas_da_partida = []
         self.partidas_treinadas = 0
         self.arquivo_memoria = arquivo_memoria
 
         if arquivo_memoria:
             self.carregar_memoria(arquivo_memoria)
 
+    def resetar_memoria(self):
+        self.pontuacoes = {}
+        self.jogadas_da_partida = []
+        self.partidas_treinadas = 0
+        self.taxa_exploracao = self.taxa_exploracao_inicial
+
     def jogar(self, tabuleiro):
         estado = tuple(tabuleiro.casas)
         livres = tabuleiro.posicoes_livres()
 
         if random.random() < self.taxa_exploracao:
-            # Comportamento "ingênuo": ainda explorando jogadas novas
             pos = random.choice(livres)
         else:
-            # Usa o que aprendeu: escolhe a(s) jogada(s) com maior pontuação
-            # para este estado específico do tabuleiro. Jogadas nunca vistas
-            # valem 0 (nem melhores, nem piores que uma jogada "neutra").
-            melhor_pontuacao = None
+            melhor_valor = None
             candidatas = []
+
             for p in livres:
-                pontuacao = self.pontuacoes.get((estado, p), 0)
-                if melhor_pontuacao is None or pontuacao > melhor_pontuacao:
-                    melhor_pontuacao = pontuacao
+                soma, visitas = self.pontuacoes.get((estado, p), [0.0, 0])
+
+                # Jogadas ainda nunca testadas recebem prioridade quando nao
+                # estamos explorando aleatoriamente.
+                if visitas == 0:
+                    valor = 1e9
+                else:
+                    valor = soma / visitas
+
+                if melhor_valor is None or valor > melhor_valor:
+                    melhor_valor = valor
                     candidatas = [p]
-                elif pontuacao == melhor_pontuacao:
+                elif valor == melhor_valor:
                     candidatas.append(p)
+
             pos = random.choice(candidatas)
 
         self.jogadas_da_partida.append((estado, pos))
         return pos
 
     def aprender_com_resultado(self, resultado):
-        """
-        Chamado ao final de cada partida com 'vitoria', 'empate' ou
-        'derrota' (do ponto de vista deste jogador). Distribui os pontos
-        para todas as jogadas feitas na partida e decai a exploração.
-        """
         delta = {
             'vitoria': self.PONTOS_VITORIA,
             'empate': self.PONTOS_EMPATE,
             'derrota': self.PONTOS_DERROTA,
-        }.get(resultado, 0)
+        }.get(resultado, 0.0)
 
+        # A recompensa final continua sendo atribuida as jogadas da partida,
+        # mas agora em forma de media: isso impede que a frequencia de uso
+        # sozinha aumente indefinidamente a pontuacao de uma jogada.
         for chave in self.jogadas_da_partida:
-            self.pontuacoes[chave] = self.pontuacoes.get(chave, 0) + delta
+            soma, visitas = self.pontuacoes.get(chave, [0.0, 0])
+            self.pontuacoes[chave] = [soma + delta, visitas + 1]
 
         self.jogadas_da_partida = []
         self.partidas_treinadas += 1
@@ -278,17 +290,26 @@ class JogadorAprendiz(Jogador):
         )
 
     def melhores_jogadas(self, n=10):
-        """Retorna as n jogadas (estado, posição) com maior pontuação — útil para depuração."""
-        return sorted(self.pontuacoes.items(), key=lambda item: item[1], reverse=True)[:n]
+        def valor(item):
+            soma, visitas = item[1]
+            return (soma / visitas) if visitas else 0.0
+
+        return sorted(self.pontuacoes.items(), key=valor, reverse=True)[:n]
 
     def salvar_memoria(self, caminho=None):
         caminho = caminho or self.arquivo_memoria
         if not caminho:
-            raise ValueError("Nenhum caminho de arquivo informado para salvar a memória.")
+            raise ValueError("Nenhum caminho de arquivo informado para salvar a memoria.")
 
         registros = [
-            {"estado": list(estado), "pos": pos, "pontos": pontos}
-            for (estado, pos), pontos in self.pontuacoes.items()
+            {
+                "estado": list(estado),
+                "pos": pos,
+                "soma": dados[0],
+                "visitas": dados[1],
+                "valor_medio": (dados[0] / dados[1]) if dados[1] else 0.0,
+            }
+            for (estado, pos), dados in self.pontuacoes.items()
         ]
         dados = {
             "nome": self.nome,
@@ -305,11 +326,26 @@ class JogadorAprendiz(Jogador):
             with open(caminho, "r", encoding="utf-8") as f:
                 dados = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            return  # Sem memória prévia: começa do zero (ingênuo de verdade)
+            return
 
-        self.pontuacoes = {
-            (tuple(item["estado"]), item["pos"]): item["pontos"]
-            for item in dados.get("jogadas", [])
-        }
-        self.taxa_exploracao = dados.get("taxa_exploracao", self.taxa_exploracao)
+        self.pontuacoes = {}
+        for item in dados.get("jogadas", []):
+            estado = tuple(item["estado"])
+            pos = item["pos"]
+            if "soma" in item and "visitas" in item:
+                self.pontuacoes[(estado, pos)] = [
+                    float(item["soma"]), int(item["visitas"])
+                ]
+            else:
+                # Compatibilidade com a memoria antiga: uma pontuacao antiga
+                # e tratada como uma visita unica.
+                self.pontuacoes[(estado, pos)] = [
+                    float(item.get("pontos", 0)), 1
+                ]
+
+        self.taxa_exploracao = max(
+            self.taxa_exploracao_minima,
+            float(dados.get("taxa_exploracao", self.taxa_exploracao)),
+        )
         self.partidas_treinadas = dados.get("partidas_treinadas", 0)
+
