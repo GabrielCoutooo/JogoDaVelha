@@ -1,5 +1,5 @@
-from jogadores import JogadorHumano, JogadorIngenuo, JogadorFera, JogadorAprendiz
-from jogo import jogar_partida, executar_serie_ia_vs_ia
+from jogadores import JogadorHumano, JogadorIngenuo, JogadorFera, JogadorInteligente
+from jogo import jogar_partida, executar_serie_ia_vs_ia, executar_treino_com_checkpoints
 
 
 def escolher_jogador(numero):
@@ -8,7 +8,7 @@ def escolher_jogador(numero):
     print("1 - Usuário (humano)")
     print("2 - IA Ingênua (joga em posições aleatórias)")
     print("3 - IA Fera (joga por regras, na raça, e nunca perde)")
-    print("4 - IA Aprendiz (começa ingênua e aprende as jogadas que dão certo)")
+    print("4 - IA Inteligente (começa ingênua e aprende as jogadas que dão certo)")
     print("0 - Sair do jogo")
 
     while True:
@@ -21,18 +21,33 @@ def escolher_jogador(numero):
         elif opcao == '3':
             return JogadorFera(f"IA Fera {numero}")
         elif opcao == '4':
-            nome = f"IA Aprendiz {numero}"
+            nome = f"IA Inteligente {numero}"
             arquivo = f"memoria_{nome.replace(' ', '_')}.json"
-            jogador = JogadorAprendiz(nome, arquivo_memoria=arquivo)
+            jogador = JogadorInteligente(nome, arquivo_memoria=arquivo)
+
             if jogador.pontuacoes:
                 print(
-                    f"  -> Memória carregada de '{arquivo}': "
+                    f"  -> Encontrada memória salva em '{arquivo}': "
                     f"{len(jogador.pontuacoes)} jogadas mapeadas, "
                     f"{jogador.partidas_treinadas} partida(s) já treinadas, "
                     f"taxa de exploração atual: {jogador.taxa_exploracao:.3f}."
                 )
+                while True:
+                    escolha = input(
+                        "     Continuar de onde parou ou começar do zero, apagando "
+                        "essa memória? [c/z]: "
+                    ).strip().lower()
+                    if escolha == 'c':
+                        break
+                    elif escolha == 'z':
+                        jogador.resetar_memoria()
+                        print("     -> Memória zerada. Começando 100% ingênua, como se fosse nova.")
+                        break
+                    else:
+                        print("     Digite 'c' para continuar ou 'z' para zerar.")
             else:
                 print(f"  -> Sem memória prévia em '{arquivo}': começando 100% ingênua.")
+
             return jogador
         elif opcao == '0':
             return None
@@ -44,9 +59,9 @@ def eh_humano(jogador):
     return isinstance(jogador, JogadorHumano)
 
 
-def salvar_memoria_se_aprendiz(jogador):
-    """Se o jogador for uma IA Aprendiz, persiste a tabela de pontuação em disco."""
-    if isinstance(jogador, JogadorAprendiz) and jogador.arquivo_memoria:
+def salvar_memoria_se_inteligente(jogador):
+    """Se o jogador for uma IA Inteligente, persiste a tabela de pontuação em disco."""
+    if isinstance(jogador, JogadorInteligente) and jogador.arquivo_memoria:
         jogador.salvar_memoria()
         print(
             f"Memória de '{jogador.nome}' salva em '{jogador.arquivo_memoria}' "
@@ -74,31 +89,65 @@ def jogar_uma_rodada():
         # Pelo menos um humano envolvido: partida única, com tabuleiro visível
         jogar_partida(jogador1, jogador2, mostrar_tabuleiro=True, registrar_jogadas=False)
     else:
-        # IA vs IA: série de partidas, sem tela, só exportação de histórico.
-        # Cada partida da série já treina automaticamente qualquer IA Aprendiz envolvida.
-        while True:
-            try:
-                num_partidas = int(input("\nQuantas partidas deseja simular entre as IAs? "))
-                if num_partidas <= 0:
-                    print("Digite um número maior que zero.")
-                    continue
-                break
-            except ValueError:
-                print("Digite um número válido.")
+        # IA vs IA. Cada partida já treina automaticamente qualquer IA
+        # Inteligente envolvida (seja em qual dos dois modos abaixo).
+        tem_inteligente = isinstance(jogador1, JogadorInteligente) or isinstance(jogador2, JogadorInteligente)
+        modo = '1'
+        if tem_inteligente:
+            print("\n1 - Simular uma quantidade de partidas e ver só o placar final")
+            print("2 - Treinar com pontos de observação (ver a evolução conforme treina)")
+            while True:
+                modo = input("Escolha: ").strip()
+                if modo in ('1', '2'):
+                    break
+                print("Digite 1 ou 2.")
 
-        print(f"\nSimulando {num_partidas} partida(s) entre {jogador1.nome} e {jogador2.nome}...")
-        caminho, placar, porcentagens = executar_serie_ia_vs_ia(jogador1, jogador2, num_partidas)
-        print(f"\nSimulação concluída! Histórico salvo em: {caminho}")
-        print("\nPlacar final:")
-        for nome, vitorias in placar.items():
-            pct = porcentagens[nome]
-            rotulo = "Empates" if nome == "Empate" else nome
-            print(f"  {rotulo}: {vitorias} ({pct:.1f}%)")
+        if modo == '2':
+            entrada = input(
+                "Pontos de observação, separados por vírgula "
+                "(ex.: 1000,10000,50000,100000): "
+            ).strip()
+            pontos = [int(p) for p in entrada.split(',') if p.strip().isdigit() and int(p) > 0]
+            if not pontos:
+                pontos = [1000, 10000, 50000, 100000]
+                print(f"  -> Nenhum valor válido digitado, usando o padrão: {pontos}")
+
+            print(f"\nTreinando {jogador1.nome} x {jogador2.nome} até {max(pontos)} partida(s)...")
+            caminho, registros = executar_treino_com_checkpoints(jogador1, jogador2, pontos)
+            print(f"\nTreino concluído! Evolução salva em: {caminho}\n")
+            print(f"{'Partidas':>10} | {'Vit. ' + jogador1.nome:>14} | {'Vit. ' + jogador2.nome:>14} | {'Empates':>10}")
+            for r in registros:
+                p = r["porcentagens"]
+                print(
+                    f"{r['partidas_acumuladas']:>10} | "
+                    f"{p[jogador1.nome]:>13.1f}% | "
+                    f"{p[jogador2.nome]:>13.1f}% | "
+                    f"{p['Empate']:>9.1f}%"
+                )
+        else:
+            while True:
+                try:
+                    num_partidas = int(input("\nQuantas partidas deseja simular entre as IAs? "))
+                    if num_partidas <= 0:
+                        print("Digite um número maior que zero.")
+                        continue
+                    break
+                except ValueError:
+                    print("Digite um número válido.")
+
+            print(f"\nSimulando {num_partidas} partida(s) entre {jogador1.nome} e {jogador2.nome}...")
+            caminho, placar, porcentagens = executar_serie_ia_vs_ia(jogador1, jogador2, num_partidas)
+            print(f"\nSimulação concluída! Histórico salvo em: {caminho}")
+            print("\nPlacar final:")
+            for nome, vitorias in placar.items():
+                pct = porcentagens[nome]
+                rotulo = "Empates" if nome == "Empate" else nome
+                print(f"  {rotulo}: {vitorias} ({pct:.1f}%)")
 
     # Ao final da rodada (partida única ou série), salva o aprendizado de
-    # qualquer IA Aprendiz que tenha participado, para reaproveitar depois.
-    salvar_memoria_se_aprendiz(jogador1)
-    salvar_memoria_se_aprendiz(jogador2)
+    # qualquer IA Inteligente que tenha participado, para reaproveitar depois.
+    salvar_memoria_se_inteligente(jogador1)
+    salvar_memoria_se_inteligente(jogador2)
 
     return True
 
